@@ -25,6 +25,12 @@ public class ValidatingResource {
     public String blah(@Validated ValidRepresentation representation) {
         return representation.getName();
     }
+    
+    @POST
+    @Path("taco")
+    public String party(@Validated @NotNull ValidRepresentation representation) {
+        return "Taco party!";
+    }
 
     @GET
     @Path("bar")

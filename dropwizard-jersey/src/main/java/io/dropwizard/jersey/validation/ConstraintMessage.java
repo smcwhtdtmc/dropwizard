@@ -1,5 +1,7 @@
 package io.dropwizard.jersey.validation;
 
+import java.util.Set;
+
 import com.google.common.base.Optional;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -34,19 +36,19 @@ public class ConstraintMessage {
             .expireAfterWrite(1, TimeUnit.HOURS)
             .build();
 
-    public static String getMessage(ConstraintViolation<?> v) {
+    public static String getMessage(ConstraintViolation<?> v, Set<Method> resourceMethods) {
         Pair<Path, ? extends ConstraintDescriptor<?>> of =
                 Pair.of(v.getPropertyPath(), v.getConstraintDescriptor());
 
         String message = MESSAGES_CACHE.getIfPresent(of);
         if (message == null) {
-            message = calculateMessage(v);
+            message = calculateMessage(v, resourceMethods);
             MESSAGES_CACHE.put(of, message);
         }
         return message;
     }
 
-    private static String calculateMessage(ConstraintViolation<?> v) {
+    private static String calculateMessage(ConstraintViolation<?> v, Set<Method> resourceMethods) {
         final Optional<String> returnValueName = getMethodReturnValueName(v);
         if (returnValueName.isPresent()) {
             final String name = isValidationMethod(v) ?
@@ -55,15 +57,16 @@ public class ConstraintMessage {
         } else if (isValidationMethod(v)) {
             return ConstraintViolations.validationMethodFormatted(v);
         } else {
-            final String name = getMemberName(v).or(v.getPropertyPath().toString());
+            final String name = getMemberName(v, resourceMethods).or(v.getPropertyPath().toString());
             return name + " " + v.getMessage();
         }
     }
 
     /**
      * Gets a method parameter (or a parameter field) name, if the violation raised in it.
+     * @param resourceMethods 
      */
-    private static Optional<String> getMemberName(ConstraintViolation<?> violation) {
+    private static Optional<String> getMemberName(ConstraintViolation<?> violation, Set<Method> resourceMethods) {
         final int size = Iterables.size(violation.getPropertyPath());
         if (size < 2) {
             return Optional.absent();
@@ -81,8 +84,16 @@ public class ConstraintMessage {
                 Class<?>[] parcs = params.toArray(new Class<?>[params.size()]);
                 Method method = MethodUtils.getAccessibleMethod(resourceClass, parent.getName(), parcs);
 
-                int paramIndex = member.as(Path.ParameterNode.class).getParameterIndex();
-                return getMemberName(method.getParameterAnnotations()[paramIndex]);
+                int paramIndex = member.as(Path.ParameterNode.class).getParameterIndex();                
+                if (resourceMethods.contains(method)) {
+                    /*
+                     * If this is a resource method, we'll try to name the parameter.  By Jersey convention, un-annotated
+                     * parameters on resource methods represent the entity from the request body.
+                     */
+                    return getMemberName(method.getParameterAnnotations()[paramIndex]).or(Optional.of("The request entity"));
+                } else {
+                    return Optional.absent();
+                }
             default:
                 return Optional.absent();
         }
@@ -127,7 +138,6 @@ public class ConstraintMessage {
                 return Optional.of("matrix param " + ((MatrixParam) a).value());
             }
         }
-
         return Optional.absent();
     }
 
